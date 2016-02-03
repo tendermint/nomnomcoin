@@ -3,45 +3,29 @@ syntax = "proto3";
 package types;
 
 //----------------------------------------
-// Tx types
+// Tx
 
-message SendTx {
+message Tx {
   repeated  Input           inputs          = 1;
   repeated  Output          outputs         = 2;
 }
 
 message Input {
-            bytes           address         = 1;
+            bytes           pubKey          = 1;
             uint64          amount          = 2;
             uint32          sequence        = 3;
             bytes           signature       = 4;
-            PubKey          pubKey          = 5;
 }
 
 message Output {
-            bytes           address         = 1;
+            bytes           pubKey          = 1;
             uint64          amount          = 2;
-}
-
-//----------------------------------------
-// PubKey types
-
-message PubKey {
-  oneof type {
-            PubKeyEd25519   pubKeyEd25519   = 1;
-  }
-}
-
-message PubKeyEd25519 {
-            bytes           bytes           = 1;
 }
 
 //----------------------------------------
 // Account
 
 message Account {
-            PubKey          pubKey          = 1;
-            uint32          sequence        = 2;
-            uint64          balance         = 3;
+            uint32          sequence        = 1;
+            uint64          balance         = 2;
 }
-
