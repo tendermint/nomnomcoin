@@ -40,6 +40,7 @@ Nomnomcoin.prototype.setOption = function(req, cb) {
 }
 
 Nomnomcoin.prototype.appendTx = function(req, cb) {
+  // Decode and validate tx
   var tx;
   try {
     tx = types.Tx.decode(req.data);
@@ -49,57 +50,20 @@ Nomnomcoin.prototype.appendTx = function(req, cb) {
   if (!validateTx(tx, cb)) {
     return;
   }
-  var inputKeys = tx.inputs.map((input) => {return input.pubKey.toBuffer();});
-  var outputKeys = tx.outputs.map((output) => {return output.pubKey.toBuffer();});
-  var allKeys = inputKeys.concat(outputKeys);
-  loadAccounts(allKeys, this.eyesCli, (accMap) => {
-    // While we process inputs/outputs,
-    // constructed ordered list of accounts.
-    // We want this deterministic order for storeAccounts().
+  loadAccounts(this.eyesCli, allPubKeys(tx), (accMap) => {
+    // Execute transaction
     var accounts = [];
-    // Deduct from inputs
-    for (var i=0; i<tx.inputs.length; i++) {
-      var input = tx.inputs[i];
-      var acc = accMap[input.pubKey.toBinary()];
-      if (!acc) {
-        return cb({code:tmsp.CodeType.UnknownAccount, log:"Input account does not exist"});
-      }
-      if (acc.sequence != input.sequence) {
-        return cb({code:tmsp.CodeType.BadNonce, log:"Invalid sequence"});
-      }
-      if (acc.balance.lt(input.amount)) {
-        return cb({code:tmsp.CodeType.InsufficientFunds, log:"Insufficent funds"});
-      }
-      // Good!
-      acc.sequence++;
-      acc.balance = acc.balance.sub(input.amount);
-      accounts.push(acc);
-    }
-    // Add to outputs
-    for (var i=0; i<tx.outputs.length; i++) {
-      var output = tx.outputs[i];
-      var acc = accMap[output.pubKey.toBinary()];
-      // Create new account if it doesn't already exist.
-      if (!acc) {
-        acc = new types.Account({
-          balance:  output.amount,
-          sequence: 0,
-        });
-        acc._pubKey = output.pubKey.toBuffer();
-        accMap[output.pubKey.toBinary()] = acc;
-        continue;
-      }
-      // Good!
-      acc.balance = acc.balance.add(output.amount);
-      accounts.push(acc);
+    if (!execTx(tx, accMap, accounts, cb)) {
+      return;
     }
     // Save result
-    storeAccounts(accounts, this.eyesCli);
+    storeAccounts(this.eyesCli, accounts);
     return cb({code:tmsp.CodeType.OK});
   });
 }
 
 Nomnomcoin.prototype.checkTx = function(req, cb) {
+  // Decode and validate tx
   var tx;
   try {
     tx = types.Tx.decode(req.data);
@@ -109,33 +73,12 @@ Nomnomcoin.prototype.checkTx = function(req, cb) {
   if (!validateTx(tx, cb)) {
     return;
   }
-  var inputKeys = tx.inputs.map((input) => {return input.pubKey.toBuffer();});
-  var outputKeys = tx.outputs.map((output) => {return output.pubKey.toBuffer();});
-  var allKeys = inputKeys.concat(outputKeys);
-  loadAccounts(allKeys, this.eyesCli, (accMap) => {
-    // While we process inputs/outputs,
-    // constructed ordered list of accounts.
-    // We want this deterministic order for storeAccounts().
-    var accounts = [];
-    // Deduct from inputs
-    for (var i=0; i<tx.inputs.length; i++) {
-      var input = tx.inputs[i];
-      var acc = accMap[input.pubKey.toBinary()];
-      if (!acc) {
-        return cb({code:tmsp.CodeType.UnknownAccount, log:"Input account does not exist"});
-      }
-      if (acc.sequence != input.sequence) {
-        return cb({code:tmsp.CodeType.BadNonce, log:"Invalid sequence"});
-      }
-      if (acc.balance.lt(input.amount)) {
-        return cb({code:tmsp.CodeType.InsufficientFunds, log:"Insufficent funds"});
-      }
-      // Good!
-      acc.sequence++;
-      acc.balance = acc.balance.sub(input.amount);
-      accounts.push(acc);
+  loadAccounts(this.eyesCli, allPubKeys(tx), (accMap) => {
+    // Execute transaction
+    if (!execTx(tx, accMap, [], cb)) {
+      return;
     }
-    // And, that's all we need to do to check the tx.
+    // Do not save anything
     return cb({code:tmsp.CodeType.OK});
   });
 }
@@ -158,7 +101,7 @@ Nomnomcoin.prototype.query = function(req, cb) {
 // Loads accounts in batch from eyesCli
 // Calls loadAccountsCb(accountMap).
 // Ignores unknown accounts.
-function loadAccounts(pubKeys, eyesCli, loadAccountsCb) {
+function loadAccounts(eyesCli, pubKeys, loadAccountsCb) {
   // Reads can happen in any order, in parallel.
   async.map(pubKeys, function(pubKeyBytes, cb) {
     eyesCli.get(pubKeyBytes, (accBytes)=>{
@@ -190,7 +133,7 @@ function loadAccounts(pubKeys, eyesCli, loadAccountsCb) {
 
 // Stores accounts in batch to eyesCli
 // NOTE: this function takes no callbacks.
-function storeAccounts(accounts, eyesCli) {
+function storeAccounts(eyesCli, accounts) {
   // Writes must happen in deterministic order.
   for (var i=0; i<accounts.length; i++) {
     var acc = accounts[i];
@@ -299,6 +242,58 @@ function sumAmount(things) {
 
 function len(bb) {
   return bb.limit - bb.offset;
+}
+
+function allPubKeys(tx) {
+  var inputKeys = tx.inputs.map((input) => {return input.pubKey.toBuffer();});
+  var outputKeys = tx.outputs.map((output) => {return output.pubKey.toBuffer();});
+  return inputKeys.concat(outputKeys);
+}
+
+// Executs transaction, while filling in accounts
+// with updated account data in order of appearance in tx.
+// We want this deterministic order for saving.
+function execTx(tx, accMap, accounts, cb) {
+  // Deduct from inputs
+  for (var i=0; i<tx.inputs.length; i++) {
+    var input = tx.inputs[i];
+    var acc = accMap[input.pubKey.toBinary()];
+    if (!acc) {
+      cb({code:tmsp.CodeType.UnknownAccount, log:"Input account does not exist"});
+      return false;
+    }
+    if (acc.sequence != input.sequence) {
+      cb({code:tmsp.CodeType.BadNonce, log:"Invalid sequence"});
+      return false;
+    }
+    if (acc.balance.lt(input.amount)) {
+      cb({code:tmsp.CodeType.InsufficientFunds, log:"Insufficent funds"});
+      return false;
+    }
+    // Good!
+    acc.sequence++;
+    acc.balance = acc.balance.sub(input.amount);
+    accounts.push(acc);
+  }
+  // Add to outputs
+  for (var i=0; i<tx.outputs.length; i++) {
+    var output = tx.outputs[i];
+    var acc = accMap[output.pubKey.toBinary()];
+    // Create new account if it doesn't already exist.
+    if (!acc) {
+      acc = new types.Account({
+        balance:  output.amount,
+        sequence: 0,
+      });
+      acc._pubKey = output.pubKey.toBuffer();
+      accMap[output.pubKey.toBinary()] = acc;
+      continue;
+    }
+    // Good!
+    acc.balance = acc.balance.add(output.amount);
+    accounts.push(acc);
+  }
+  return true;
 }
 
 //----------------------------------------
