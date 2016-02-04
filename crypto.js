@@ -1,6 +1,6 @@
 var nacl_factory = require('js-nacl');
 var nacl = nacl_factory.instantiate();
-var bcrypt = require("bcryptjs");
+//var bcrypt = require("bcryptjs");
 var crypto = require("crypto");
 
 function verify(pubKeyBytes, msgBytes, sigBytes) {
@@ -23,9 +23,11 @@ function deriveKeyPair(seed) {
   if (!seed) {
     throw "seed cannot be empty";
   }
-  var seedBcrypt = bcrypt.hashSync(seed, 10);
+  // oops, this is wrong.
+  //var seedBcrypt = bcrypt.hashSync(seed, 10);
   var seedSha256 = crypto.createHash("sha256").
-    update(seedBcrypt, "binary").
+    //update(seedBcrypt, "binary").
+    update(seed, "utf8").
     digest();
   var keypair = nacl.crypto_sign_keypair_from_seed(seedSha256);
   var privKeyBytes = keypair.signSk;

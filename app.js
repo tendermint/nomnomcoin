@@ -20,7 +20,23 @@ Nomnomcoin.prototype.info = function(req, cb) {
 }
 
 Nomnomcoin.prototype.setOption = function(req, cb) {
-  return cb({log:"No options supported"});
+  if (req.key == "give") { // Give users some coins, for initialization
+    var opts = JSON.parse(req.value);
+    var seed = opts.seed;
+    var balance = opts.balance;
+    var pair = crypto.deriveKeyPair(seed);
+    eyesCli.set(
+      pair.pubKeyBytes,
+      new types.Account({balance:balance}).encode().toBuffer(),
+      (res) => {
+        var logMsg = "User "+seed+" balance set to "+balance;
+        console.log(logMsg);
+        cb({log:logMsg});
+      }
+    );
+  } else {
+    return cb({log:"Unrecognized option key "+req.key});
+  }
 }
 
 Nomnomcoin.prototype.appendTx = function(req, cb) {
@@ -35,115 +51,152 @@ Nomnomcoin.prototype.appendTx = function(req, cb) {
   }
   var inputKeys = tx.inputs.map((input) => {return input.pubKey.toBuffer();});
   var outputKeys = tx.outputs.map((output) => {return output.pubKey.toBuffer();});
-  loadAccounts(
-    inputKeys.concat(outputKeys),
-    this.eyesCli,
-    (accMap) => {
-      // Deduct from inputs
-      for (var i=0; i<tx.inputs.length; i++) {
-        var input = tx.inputs[i];
-        var acc = accMap[input.pubKey.toBinary()];
-        if (!acc) {
-          return cb({code:tmsp.CodeType.UnknownAccount, log:"Input account does not exist"});
-        }
-        if (acc.sequence != input.sequence) {
-          return cb({code:tmsp.CodeType.BadNonce, log:"Invalid sequence"});
-        }
-        if (acc.balance.lt(input.amount)) {
-          return cb({code:tmsp.CodeType.InsufficientFunds, log:"Insufficent funds"});
-        }
-        // Good!
-        acc.sequence++;
-        acc.balance = acc.balance.sub(input.amount);
+  var allKeys = inputKeys.concat(outputKeys);
+  loadAccounts(allKeys, this.eyesCli, (accMap) => {
+    // While we process inputs/outputs,
+    // constructed ordered list of accounts.
+    // We want this deterministic order for storeAccounts().
+    var accounts = [];
+    // Deduct from inputs
+    for (var i=0; i<tx.inputs.length; i++) {
+      var input = tx.inputs[i];
+      var acc = accMap[input.pubKey.toBinary()];
+      if (!acc) {
+        return cb({code:tmsp.CodeType.UnknownAccount, log:"Input account does not exist"});
       }
-      // Add to outputs
-      for (var i=0; i<tx.outputs.length; i++) {
-        var output = tx.outputs[i];
-        var acc = accMap[output.pubKey.toBinary()];
-        if (!acc) { // Create new account
-          accMap[output.pubKey.toBinary()] = new types.Account({
-            balance:  output.amount,
-            sequence: 0,
-          });
-          continue;
-        }
-        // Good!
-        acc.balance = acc.balance.add(output.amount);
+      if (acc.sequence != input.sequence) {
+        return cb({code:tmsp.CodeType.BadNonce, log:"Invalid sequence"});
       }
-      // Update accounts
-      XXX
-      console.log("new accounts", accMap);
-      return cb({code:tmsp.CodeType.OK});
+      if (acc.balance.lt(input.amount)) {
+        return cb({code:tmsp.CodeType.InsufficientFunds, log:"Insufficent funds"});
+      }
+      // Good!
+      acc.sequence++;
+      acc.balance = acc.balance.sub(input.amount);
+      accounts.push(acc);
     }
-  );
+    // Add to outputs
+    for (var i=0; i<tx.outputs.length; i++) {
+      var output = tx.outputs[i];
+      var acc = accMap[output.pubKey.toBinary()];
+      // Create new account if it doesn't already exist.
+      if (!acc) {
+        acc = new types.Account({
+          balance:  output.amount,
+          sequence: 0,
+        });
+        acc._pubKey = output.pubKey.toBuffer();
+        accMap[output.pubKey.toBinary()] = acc;
+        continue;
+      }
+      // Good!
+      acc.balance = acc.balance.add(output.amount);
+      accounts.push(acc);
+    }
+    // Save result
+    storeAccounts(accounts, this.eyesCli);
+    return cb({code:tmsp.CodeType.OK});
+  });
 }
 
 Nomnomcoin.prototype.checkTx = function(req, cb) {
-  return cb({code:tmsp.CodeType.OK});
+  var tx;
+  try {
+    tx = types.Tx.decode(req.data);
+  } catch(err) {
+    return cb({code:tmsp.CodeType.EncodingError, log:''+err});
+  }
+  if (!validateTx(tx, cb)) {
+    return;
+  }
+  var inputKeys = tx.inputs.map((input) => {return input.pubKey.toBuffer();});
+  var outputKeys = tx.outputs.map((output) => {return output.pubKey.toBuffer();});
+  var allKeys = inputKeys.concat(outputKeys);
+  loadAccounts(allKeys, this.eyesCli, (accMap) => {
+    // While we process inputs/outputs,
+    // constructed ordered list of accounts.
+    // We want this deterministic order for storeAccounts().
+    var accounts = [];
+    // Deduct from inputs
+    for (var i=0; i<tx.inputs.length; i++) {
+      var input = tx.inputs[i];
+      var acc = accMap[input.pubKey.toBinary()];
+      if (!acc) {
+        return cb({code:tmsp.CodeType.UnknownAccount, log:"Input account does not exist"});
+      }
+      if (acc.sequence != input.sequence) {
+        return cb({code:tmsp.CodeType.BadNonce, log:"Invalid sequence"});
+      }
+      if (acc.balance.lt(input.amount)) {
+        return cb({code:tmsp.CodeType.InsufficientFunds, log:"Insufficent funds"});
+      }
+      // Good!
+      acc.sequence++;
+      acc.balance = acc.balance.sub(input.amount);
+      accounts.push(acc);
+    }
+    // And, that's all we need to do to check the tx.
+    return cb({code:tmsp.CodeType.OK});
+  });
 }
 
 Nomnomcoin.prototype.getHash = function(req, cb) {
-  var hash = new Buffer(20);
-  return cb({data: hash});
+  this.eyesCli.getHash((hash) => {
+    cb({data: hash});
+  });
 }
 
 Nomnomcoin.prototype.query = function(req, cb) {
-  return cb({code:tmsp.CodeType.OK, log:"Query not yet supported"});
-}
-
-//----------------------------------------
-
-// Loads accounts in parallel from eyesCli
-// Calls loadAccountsCb(accountMap).
-// Ignores unknown accounts.
-function loadAccounts(pubKeys, eyesCli, loadAccountsCb) {
-  async.map(pubKeys, function(pubKeyBytes, cb) {
-    eyesCli.get(pubKeyBytes, (accBytes)=>{
-      console.log("loaded", pubKeyBytes);
-      if (accBytes.length == 0) {
-        cb(null, null);
-      } else {
-        var acc = types.Account.decode(accBytes);
-        cb(null, acc);
-      };
-    });
-  }, function(err, accounts) {
-    var accountsMap = accounts.reduce((m,acc) => {
-      if (!acc) { return m; }
-      m[acc.pubKey.toBinary()] = acc;
-      return m;
-    }, {});
-    loadAccountsCb(accountsMap);
+  var queryBytes = req.data.toBuffer();
+  eyesCli.get(queryBytes, (accBytes)=>{
+    return cb({code:tmsp.CodeType.OK, log:"Query not yet supported"});
   });
 }
 
 //----------------------------------------
 
-console.log("Nomnomcoin v"+version);
-var eyesCli = new eyes.Client("tcp://127.0.0.1:46659");
-var app = new Nomnomcoin(eyesCli);
-var appServer = new tmsp.Server(app);
-appServer.server.listen(46658);
-
-// XXX move out
-function makeAccount(seed, balance) {
-  var pair = crypto.deriveKeyPair(seed);
-  return {
-    pubKey:   pair.pubKeyBytes,
-    data: {
-      balance:  balance,
-      sequence: 0,
+// Loads accounts in batch from eyesCli
+// Calls loadAccountsCb(accountMap).
+// Ignores unknown accounts.
+function loadAccounts(pubKeys, eyesCli, loadAccountsCb) {
+  // Reads can happen in any order, in parallel.
+  async.map(pubKeys, function(pubKeyBytes, cb) {
+    eyesCli.get(pubKeyBytes, (accBytes)=>{
+      if (accBytes.length == 0) {
+        cb(null, null);
+      } else {
+        var acc = types.Account.decode(accBytes);
+        acc._pubKey = pubKeyBytes;
+        cb(null, acc);
+      };
+    });
+  }, function(err, accounts) {
+    // We have a list of accounts now, some null.
+    // The order is the same as that of pubKeys.
+    // Create a map out of them.
+    if (!!err) {
+      throw "This shouldn't happen";
     }
-  };
+    var accountsMap = accounts.reduce((m,acc) => {
+      if (!acc) { return m; }
+      m[acc._pubKey.toString("binary")] = acc;
+      return m;
+    }, {});
+    loadAccountsCb(accountsMap);
+  });
+  // TODO: If eyesCli didn't auto-flush,
+  // We'd want to flush once here.
 }
-var user1 = makeAccount("user1", 300);
-var user2 = makeAccount("user2", 300);
-eyesCli.set(user1.pubKey, new types.Account(user1.data).encode().toBuffer(), (res) => {
-  console.log("set user1", res);
-});
-eyesCli.set(user2.pubKey, new types.Account(user2.data).encode().toBuffer(), (res) => {
-  console.log("set user2", res);
-});
+
+// Stores accounts in batch to eyesCli
+// NOTE: this function takes no callbacks.
+function storeAccounts(accounts, eyesCli) {
+  // Writes must happen in deterministic order.
+  for (var i=0; i<accounts.length; i++) {
+    var acc = accounts[i];
+    eyesCli.set(acc._pubKey, acc.encode().toBuffer()); 
+  }
+}
 
 //----------------------------------------
 
@@ -153,9 +206,10 @@ function validateTx(tx, cb) {
     return false;
   }
   var seenPubKeys = {};
+  var signBytes = txSignBytes(tx);
   for (var i=0; i<tx.inputs.length; i++) {
     var input = tx.inputs[i];
-    if (!validateInput(input, cb)) {
+    if (!validateInput(input, signBytes, cb)) {
       return false;
     }
     var pubKeyBin = input.pubKey.toBinary();
@@ -185,7 +239,15 @@ function validateTx(tx, cb) {
   return true;
 }
 
-function validateInput(input, cb) {
+function txSignBytes(tx) {
+  var txCopy = new types.Tx(tx.toRaw());
+  txCopy.inputs.forEach((input) => {
+    input.signature = new Buffer(0);
+  });
+  return txCopy.encode().toBuffer();
+}
+
+function validateInput(input, signBytes, cb) {
   if (input.amount.isZero()) {
     cb({code:tmsp.CodeType.EncodingError, log:"Input amount cannot be zero"});
     return false;
@@ -203,20 +265,12 @@ function validateInput(input, cb) {
   }
   if (!crypto.verify(
         input.pubKey.toBuffer(),
-        input2SignBytes(input),
+        signBytes,
         input.signature.toBuffer())) {
     cb({code:tmsp.CodeType.Unauthorized, log:"Invalid signature"});
     return false;
   }
   return true;
-}
-
-function input2SignBytes(input) {
-  return new types.Input({
-    pubKey: input.pubKey,
-    amount: input.amount,
-    sequence: input.sequence,
-  }).encode().toBuffer();
 }
 
 function validateOutput(output, cb) {
@@ -246,3 +300,11 @@ function sumAmount(things) {
 function len(bb) {
   return bb.limit - bb.offset;
 }
+
+//----------------------------------------
+
+console.log("Nomnomcoin v"+version);
+var eyesCli = new eyes.Client("tcp://127.0.0.1:46659");
+var app = new Nomnomcoin(eyesCli);
+var appServer = new tmsp.Server(app);
+appServer.server.listen(46658);
