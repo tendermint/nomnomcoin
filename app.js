@@ -297,8 +297,12 @@ function execTx(tx, accMap, accounts, cb) {
 
 //----------------------------------------
 
-console.log("Nomnomcoin v"+version);
-var eyesCli = new eyes.Client("tcp://127.0.0.1:46659");
+var program = require('commander');
+program
+  .version(version)
+  .option('-e, --eyes [tcp://host:port|unix://path]', 'MerkleEyes address (default tcp://127.0.0.1:46659)')
+  .parse(process.argv);
+var eyesCli = new eyes.Client(program.eyes || "tcp://127.0.0.1:46659");
 var app = new Nomnomcoin(eyesCli);
 var appServer = new tmsp.Server(app);
-appServer.server.listen(46658);
+appServer.server.listen(46658); // TODO Make arg option
