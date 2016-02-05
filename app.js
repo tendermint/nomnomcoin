@@ -6,7 +6,6 @@ var tmsp = require("js-tmsp");
 var eyes = require("js-merkleeyes");
 var types = require("./types");
 var crypto = require("./crypto");
-
 var version = "0.1";
 
 function Nomnomcoin(eyesCli){
