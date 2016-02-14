@@ -82,8 +82,8 @@ Nomnomcoin.prototype.checkTx = function(req, cb) {
   });
 }
 
-Nomnomcoin.prototype.getHash = function(req, cb) {
-  this.eyesCli.getHash((hash) => {
+Nomnomcoin.prototype.commit = function(req, cb) {
+  this.eyesCli.commit((hash) => {
     cb({data: hash});
   });
 }
@@ -91,6 +91,7 @@ Nomnomcoin.prototype.getHash = function(req, cb) {
 Nomnomcoin.prototype.query = function(req, cb) {
   var queryBytes = req.data.toBuffer();
   eyesCli.get(queryBytes, (accBytes)=>{
+    // XXX Fill it in.
     return cb({code:tmsp.CodeType.OK, log:"Query not yet supported"});
   });
 }
