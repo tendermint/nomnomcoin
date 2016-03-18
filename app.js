@@ -301,9 +301,11 @@ function execTx(tx, accMap, accounts, cb) {
 var program = require('commander');
 program
   .version(version)
+  .option('-a, --addr [tcp://host:port|unix://path]', 'Listen address (default tcp://127.0.0.1:46658)')
   .option('-e, --eyes [tcp://host:port|unix://path]', 'MerkleEyes address (default tcp://127.0.0.1:46659)')
   .parse(process.argv);
 var eyesCli = new eyes.Client(program.eyes || "tcp://127.0.0.1:46659");
+var addr = tmsp.ParseAddr(program.addr || "tcp://127.0.0.1:46658");
 var app = new Nomnomcoin(eyesCli);
 var appServer = new tmsp.Server(app);
-appServer.server.listen(46658); // TODO Make arg option
+appServer.server.listen(addr);
