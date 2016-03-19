@@ -5,7 +5,7 @@
   "main": "index.js",
   "dependencies": {
     "js-merkleeyes": "~0.0.4",
-    "js-tmsp": "~0.0.9",
+    "js-tmsp": "~0.0.11",
     "js-wire": "~0.0.2",
     "js-nacl": "~0.6.0",
     "long": "~3.0.3",
