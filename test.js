@@ -76,8 +76,8 @@ async.series([
 (cb)=>{ appendTx(cli, tx([input(user1, 10)], [output(user2, 8)]), tmsp.CodeType.OK, cb); },
 (cb)=>{ appendTx(cli, tx([input(user1, 10)], [output(user2, 8)]), tmsp.CodeType.OK, cb); },
 (cb)=>{ appendTx(cli, tx([input(user1, 10)], [output(user2, 8)]), tmsp.CodeType.OK, cb); },
-(cb)=>{ appendTx(cli, tx([input(user1, 10)], [output(user2, 9)]), tmsp.CodeType.InsufficientFees, cb); },
-(cb)=>{ appendTx(cli, tx([input(user1, 10)], [output(user2, 100)]), tmsp.CodeType.InsufficientFees, cb); },
+(cb)=>{ appendTx(cli, tx([input(user1, 10)], [output(user2, 9)]), tmsp.CodeType.InsufficientFunds, cb); },
+(cb)=>{ appendTx(cli, tx([input(user1, 10)], [output(user2, 100)]), tmsp.CodeType.InsufficientFunds, cb); },
 (cb)=>{ appendTx(cli, tx([input(user1, 1000)], [output(user2, 8)]), tmsp.CodeType.InsufficientFunds, cb); },
 (cb)=>{
   // After all tests have run:

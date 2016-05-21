@@ -176,7 +176,7 @@ function validateTx(tx, cb) {
   }
   if (sumAmount(tx.inputs).lt(
       sumAmount(tx.outputs).add(tx.inputs.length+tx.outputs.length))) {
-    cb({code:tmsp.CodeType.InsufficientFees, log:"Insufficient fees"});
+    cb({code:tmsp.CodeType.InsufficientFunds, log:"Insufficient fees"});
     return false;
   }
   return true;
